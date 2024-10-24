@@ -1,13 +1,18 @@
 import WindowManager from './WindowManager.js';
 
 const t = THREE;
-let camera, scene, renderer, world;
+let camera, scene, renderer, world, particlesSystem;
 let near, far;
 let pixR = window.devicePixelRatio ? window.devicePixelRatio : 1;
 let cubes = [];
-let spheres = [];  // New array to hold spheres
-let sceneOffsetTarget = {x: 0, y: 0};
-let sceneOffset = {x: 0, y: 0};
+let spheres = [];
+let particles = [];
+let sceneOffsetTarget = { x: 0, y: 0 };
+let sceneOffset = { x: 0, y: 0 };
+
+let raycaster, mouse;
+let suctionTargets = [];
+let particleEmitters = [];
 
 let today = new Date();
 today.setHours(0);
@@ -20,20 +25,15 @@ let internalTime = getTime();
 let windowManager;
 let initialized = false;
 
-let raycaster, mouse, animationSpeed = 0.01;
-
-// Wiggle parameters
-let wiggleFrequency = 2;  // Frequency of wiggle
-let wiggleAmplitude = 5;  // Amplitude of wiggle
-
 // Get time in seconds since the beginning of the day
-function getTime () {
+function getTime() {
     return (new Date().getTime() - today) / 1000.0;
 }
 
+// Handle visibility changes
 if (new URLSearchParams(window.location.search).get("clear")) {
     localStorage.clear();
-} else {    
+} else {
     document.addEventListener("visibilitychange", () => {
         if (document.visibilityState !== 'hidden' && !initialized) {
             init();
@@ -46,7 +46,7 @@ if (new URLSearchParams(window.location.search).get("clear")) {
         }
     };
 
-    function init () {
+    function init() {
         initialized = true;
 
         setTimeout(() => {
@@ -56,31 +56,34 @@ if (new URLSearchParams(window.location.search).get("clear")) {
             updateWindowShape(false);
             render();
             window.addEventListener('resize', resize);
-
-            // Add event listener for mouse clicks
             window.addEventListener('click', onMouseClick, false);
-        }, 500);    
+        }, 500);
     }
 
-    function setupScene () {
-        camera = new t.OrthographicCamera(0, 0, window.innerWidth, window.innerHeight, -10000, 10000);
-        camera.position.z = 2.5;
-        near = camera.position.z - .5;
-        far = camera.position.z + 0.5;
+    function setupScene() {
+        camera = new t.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 10000);
+        camera.position.z = 1000;
 
         scene = new t.Scene();
-        scene.background = new t.Color(0.0);
-        scene.add(camera);
+        scene.background = new t.Color(0x000000);
 
-        renderer = new t.WebGLRenderer({antialias: true, depthBuffer: true});
+        renderer = new t.WebGLRenderer({ antialias: true, depthBuffer: true });
         renderer.setPixelRatio(pixR);
+        renderer.shadowMap.enabled = true;
+
         world = new t.Object3D();
         scene.add(world);
+
+        let ambientLight = new t.AmbientLight(0x404040);
+        scene.add(ambientLight);
+
+        let pointLight = new t.PointLight(0xffffff, 2, 1000);
+        pointLight.position.set(200, 200, 200);
+        scene.add(pointLight);
 
         renderer.domElement.setAttribute("id", "scene");
         document.body.appendChild(renderer.domElement);
 
-        // Initialize raycaster and mouse for interaction
         raycaster = new t.Raycaster();
         mouse = new t.Vector2();
     }
@@ -90,126 +93,150 @@ if (new URLSearchParams(window.location.search).get("clear")) {
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
         raycaster.setFromCamera(mouse, camera);
-
         const intersects = raycaster.intersectObjects(scene.children);
 
         if (intersects.length > 0) {
-            intersects[0].object.material.color.set(0xff0000);
-            animationSpeed = 0.05;  // Increase speed on click
+            intersects[0].object.material.color.set(0xff0000); // Change to red
         }
     }
 
-    function setupWindowManager () {
+    function setupWindowManager() {
         windowManager = new WindowManager();
         windowManager.setWinShapeChangeCallback(updateWindowShape);
         windowManager.setWinChangeCallback(windowsUpdated);
 
-        let metaData = {foo: "bar"};
-
+        let metaData = { foo: "bar" };
         windowManager.init(metaData);
+
         windowsUpdated();
     }
 
-    function windowsUpdated () {
+    function windowsUpdated() {
         updateNumberOfCubes();
+        createSpheres();
     }
 
-    function updateNumberOfCubes () {
+    function updateNumberOfCubes() {
         let wins = windowManager.getWindows();
 
-        cubes.forEach((c) => {
-            world.remove(c);
-        });
-
+        cubes.forEach(c => world.remove(c));
         cubes = [];
-        spheres = [];  // Clear spheres array
 
-        for (let i = 0; i < wins.length; i++) {
-            let win = wins[i];
+        wins.forEach((win, i) => {
+            let color = new t.Color();
+            color.setHSL(i * 0.1, 1.0, 0.5);
 
-            let c = new t.Color();
-            c.setHSL(i * .1, 1.0, .5);
-
-            let s = 100 + i * 50;
-            let cube = new t.Mesh(new t.BoxGeometry(s, s, s), new t.MeshBasicMaterial({color: c , wireframe: true}));
-            cube.position.x = win.shape.x + (win.shape.w * .5);
-            cube.position.y = win.shape.y + (win.shape.h * .5);
-
-            // Create a sphere inside the cube
-            let sphere = new t.Mesh(new t.SphereGeometry(s * 0.3, 32, 32), new t.MeshBasicMaterial({color: 0xffffff}));
-            sphere.position.set(0, 0, 0);  // Center the sphere inside the cube
-            cube.add(sphere);
+            let size = 100 + i * 50;
+            let cube = new t.Mesh(new t.BoxGeometry(size, size, size), new t.MeshBasicMaterial({ color: color, wireframe: true }));
+            cube.position.x = win.shape.x + win.shape.w * 0.5;
+            cube.position.y = win.shape.y + win.shape.h * 0.5;
 
             world.add(cube);
             cubes.push(cube);
-            spheres.push(sphere);  // Add sphere to spheres array
+        });
+    }
+
+    function createSpheres() {
+        let numSpheres = 5;
+        spheres.forEach(s => world.remove(s));
+        spheres = [];
+        suctionTargets = [];
+
+        for (let i = 0; i < numSpheres; i++) {
+            let geometry = new t.SphereGeometry(50, 32, 32);
+            let material = new t.MeshPhongMaterial({ color: 0x00ff00, shininess: 100, transparent: true, opacity: 0.9 });
+            let sphere = new t.Mesh(geometry, material);
+            sphere.castShadow = true;
+            sphere.receiveShadow = true;
+            sphere.position.set(Math.random() * window.innerWidth, Math.random() * window.innerHeight, Math.random() * 100);
+
+            world.add(sphere);
+            spheres.push(sphere);
         }
+
+        // Randomly select one sphere to be the suction target
+        suctionTargets.push(spheres[Math.floor(Math.random() * spheres.length)]);
     }
 
-    function updateWindowShape (easing = true) {
-        sceneOffsetTarget = {x: -window.screenX, y: -window.screenY};
-        if (!easing) sceneOffset = sceneOffsetTarget;
+    function animateSpheres() {
+        spheres.forEach(sphere => {
+            let wiggleIntensity = 0.05;
+            sphere.position.x += Math.sin(internalTime) * wiggleIntensity;
+            sphere.position.y += Math.cos(internalTime) * wiggleIntensity;
+        });
     }
 
-    function render () {
-        let t = getTime();
-        windowManager.update();
-
-        let falloff = .05;
-        sceneOffset.x = sceneOffset.x + ((sceneOffsetTarget.x - sceneOffset.x) * falloff);
-        sceneOffset.y = sceneOffset.y + ((sceneOffsetTarget.y - sceneOffset.y) * falloff);
-
-        world.position.x = sceneOffset.x;
-        world.position.y = sceneOffset.y;
-
-        let wins = windowManager.getWindows();
-
-        for (let i = 0; i < cubes.length; i++) {
-            let cube = cubes[i];
-            let win = wins[i];
-            let _t = t;
-
-            let posTarget = {x: win.shape.x + (win.shape.w * .5), y: win.shape.y + (win.shape.h * .5)};
-
-            cube.position.x = cube.position.x + (posTarget.x - cube.position.x) * falloff;
-            cube.position.y = cube.position.y + (posTarget.y - cube.position.y) * falloff;
-            cube.rotation.x += animationSpeed;
-            cube.rotation.y += animationSpeed;
-
-            // Wiggling effect for the spheres inside the cubes
-            let sphere = spheres[i];
-            sphere.position.x = Math.sin(_t * wiggleFrequency) * wiggleAmplitude;
-            sphere.position.y = Math.cos(_t * wiggleFrequency) * wiggleAmplitude;
-
-            // Check for overlap between spheres (simple distance check)
+    function detectCollisions() {
+        for (let i = 0; i < spheres.length - 1; i++) {
             for (let j = i + 1; j < spheres.length; j++) {
-                let otherSphere = spheres[j];
-                let distance = sphere.position.distanceTo(otherSphere.position);
-                let threshold = 50;  // Distance at which the "oozing" effect starts
-
-                if (distance < threshold) {
-                    // Start oozing effect by scaling the sphere
-                    let scaleFactor = 1 - (threshold - distance) / threshold;
-                    sphere.scale.set(scaleFactor, scaleFactor, scaleFactor);
-
-                    if (distance < 10) {
-                        // Completely absorb the other sphere
-                        otherSphere.scale.set(0, 0, 0);
+                let distance = spheres[i].position.distanceTo(spheres[j].position);
+                if (distance < 100) {
+                    triggerOozingEffect(spheres[i], spheres[j]);
+                    if (suctionTargets.includes(spheres[i]) || suctionTargets.includes(spheres[j])) {
+                        triggerSuctionEffect(spheres[i], spheres[j]);
                     }
                 }
             }
         }
-
-        renderer.render(scene, camera);
-        requestAnimationFrame(render);
     }
 
-    function resize () {
-        let width = window.innerWidth;
-        let height = window.innerHeight;
+    function triggerOozingEffect(sphere1, sphere2) {
+        let scaleFactor = 1.1;
+        sphere1.scale.set(scaleFactor, scaleFactor, scaleFactor);
+        sphere2.scale.set(scaleFactor, scaleFactor, scaleFactor);
 
-        camera = new t.OrthographicCamera(0, width, 0, height, -10000, 10000);
-        camera.updateProjectionMatrix();
-        renderer.setSize(width, height);
+        setTimeout(() => {
+            sphere1.scale.set(1, 1, 1);
+            sphere2.scale.set(1, 1, 1);
+        }, 500);
+
+        // Particle emission effect
+        emitParticles(sphere1.position);
+        emitParticles(sphere2.position);
     }
-}
+
+    function triggerSuctionEffect(sphere1, sphere2) {
+        let suctionSpeed = 0.05;
+        if (sphere1.position.distanceTo(sphere2.position) > 10) {
+            sphere2.position.lerp(sphere1.position, suctionSpeed);
+        } else {
+            // Absorb the sphere
+            world.remove(sphere2);
+            spheres.splice(spheres.indexOf(sphere2), 1);
+            suctionTargets.splice(suctionTargets.indexOf(sphere2), 1);
+
+            // Increase size of the absorbing sphere
+            sphere1.scale.set(sphere1.scale.x * 1.2, sphere1.scale.y * 1.2, sphere1.scale.z * 1.2);
+
+            // More particles upon absorption
+            emitParticles(sphere1.position);
+        }
+    }
+
+    function emitParticles(position) {
+        let particleGeometry = new t.SphereGeometry(5, 16, 16);
+        let particleMaterial = new t.MeshBasicMaterial({ color: 0xffff00 });
+        for (let i = 0; i < 20; i++) {
+            let particle = new t.Mesh(particleGeometry, particleMaterial);
+            particle.position.copy(position);
+            particle.velocity = new t.Vector3((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20, (Math.random() - 0.5) * 20);
+            particles.push(particle);
+            world.add(particle);
+        }
+    }
+
+    function animateParticles() {
+        particles.forEach((particle, index) => {
+            particle.position.add(particle.velocity);
+            particle.material.opacity -= 0.02; // Fade out particles
+
+            if (particle.material.opacity <= 0) {
+                world.remove(particle);
+                particles.splice(index, 1); // Remove faded particles
+            }
+        });
+    }
+
+    function updateWindowShape(easing = true) {
+        sceneOffsetTarget = { x: -window.screenX, y: -window.screenY };
+        if (!easing) sceneOffset = sceneOffsetTarget;
