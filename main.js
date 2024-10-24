@@ -5,6 +5,7 @@ let camera, scene, renderer, world;
 let near, far;
 let pixR = window.devicePixelRatio ? window.devicePixelRatio : 1;
 let cubes = [];
+let spheres = [];  // New array to hold spheres
 let sceneOffsetTarget = {x: 0, y: 0};
 let sceneOffset = {x: 0, y: 0};
 
@@ -19,7 +20,11 @@ let internalTime = getTime();
 let windowManager;
 let initialized = false;
 
-let raycaster, mouse, animationSpeed = 0.01; // Added animationSpeed to control rotation speed
+let raycaster, mouse, animationSpeed = 0.01;
+
+// Wiggle parameters
+let wiggleFrequency = 2;  // Frequency of wiggle
+let wiggleAmplitude = 5;  // Amplitude of wiggle
 
 // Get time in seconds since the beginning of the day
 function getTime () {
@@ -89,9 +94,8 @@ if (new URLSearchParams(window.location.search).get("clear")) {
         const intersects = raycaster.intersectObjects(scene.children);
 
         if (intersects.length > 0) {
-            // Change the color of the object and increase its rotation speed
             intersects[0].object.material.color.set(0xff0000);
-            animationSpeed = 0.05; // Increase speed on click
+            animationSpeed = 0.05;  // Increase speed on click
         }
     }
 
@@ -118,6 +122,7 @@ if (new URLSearchParams(window.location.search).get("clear")) {
         });
 
         cubes = [];
+        spheres = [];  // Clear spheres array
 
         for (let i = 0; i < wins.length; i++) {
             let win = wins[i];
@@ -130,8 +135,14 @@ if (new URLSearchParams(window.location.search).get("clear")) {
             cube.position.x = win.shape.x + (win.shape.w * .5);
             cube.position.y = win.shape.y + (win.shape.h * .5);
 
+            // Create a sphere inside the cube
+            let sphere = new t.Mesh(new t.SphereGeometry(s * 0.3, 32, 32), new t.MeshBasicMaterial({color: 0xffffff}));
+            sphere.position.set(0, 0, 0);  // Center the sphere inside the cube
+            cube.add(sphere);
+
             world.add(cube);
             cubes.push(cube);
+            spheres.push(sphere);  // Add sphere to spheres array
         }
     }
 
@@ -162,8 +173,31 @@ if (new URLSearchParams(window.location.search).get("clear")) {
 
             cube.position.x = cube.position.x + (posTarget.x - cube.position.x) * falloff;
             cube.position.y = cube.position.y + (posTarget.y - cube.position.y) * falloff;
-            cube.rotation.x += animationSpeed; // Apply animation speed to rotation
+            cube.rotation.x += animationSpeed;
             cube.rotation.y += animationSpeed;
+
+            // Wiggling effect for the spheres inside the cubes
+            let sphere = spheres[i];
+            sphere.position.x = Math.sin(_t * wiggleFrequency) * wiggleAmplitude;
+            sphere.position.y = Math.cos(_t * wiggleFrequency) * wiggleAmplitude;
+
+            // Check for overlap between spheres (simple distance check)
+            for (let j = i + 1; j < spheres.length; j++) {
+                let otherSphere = spheres[j];
+                let distance = sphere.position.distanceTo(otherSphere.position);
+                let threshold = 50;  // Distance at which the "oozing" effect starts
+
+                if (distance < threshold) {
+                    // Start oozing effect by scaling the sphere
+                    let scaleFactor = 1 - (threshold - distance) / threshold;
+                    sphere.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+                    if (distance < 10) {
+                        // Completely absorb the other sphere
+                        otherSphere.scale.set(0, 0, 0);
+                    }
+                }
+            }
         }
 
         renderer.render(scene, camera);
