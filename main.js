@@ -19,9 +19,9 @@ let internalTime = getTime();
 let windowManager;
 let initialized = false;
 
-let raycaster, mouse;
+let raycaster, mouse, animationSpeed = 0.01; // Added animationSpeed to control rotation speed
 
-// get time in seconds since beginning of the day (so that all windows use the same time)
+// Get time in seconds since the beginning of the day
 function getTime () {
     return (new Date().getTime() - today) / 1000.0;
 }
@@ -29,15 +29,14 @@ function getTime () {
 if (new URLSearchParams(window.location.search).get("clear")) {
     localStorage.clear();
 } else {    
-    // this code is essential to circumvent that some browsers preload the content of some pages before you actually hit the url
     document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState != 'hidden' && !initialized) {
+        if (document.visibilityState !== 'hidden' && !initialized) {
             init();
         }
     });
 
     window.onload = () => {
-        if (document.visibilityState != 'hidden') {
+        if (document.visibilityState !== 'hidden') {
             init();
         }
     };
@@ -45,7 +44,6 @@ if (new URLSearchParams(window.location.search).get("clear")) {
     function init () {
         initialized = true;
 
-        // add a short timeout because window.offsetX reports wrong values before a short period 
         setTimeout(() => {
             setupScene();
             setupWindowManager();
@@ -83,19 +81,17 @@ if (new URLSearchParams(window.location.search).get("clear")) {
     }
 
     function onMouseClick(event) {
-        // Calculate mouse position in normalized device coordinates (-1 to +1)
         mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
         mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-        // Update the raycaster with the camera and mouse position
         raycaster.setFromCamera(mouse, camera);
 
-        // Calculate objects intersecting the ray
         const intersects = raycaster.intersectObjects(scene.children);
 
-        // If there is an intersection, change the object's color
         if (intersects.length > 0) {
-            intersects[0].object.material.color.set(0xff0000);  // Change to red
+            // Change the color of the object and increase its rotation speed
+            intersects[0].object.material.color.set(0xff0000);
+            animationSpeed = 0.05; // Increase speed on click
         }
     }
 
@@ -104,13 +100,9 @@ if (new URLSearchParams(window.location.search).get("clear")) {
         windowManager.setWinShapeChangeCallback(updateWindowShape);
         windowManager.setWinChangeCallback(windowsUpdated);
 
-        // Add custom metadata to each window instance
         let metaData = {foo: "bar"};
 
-        // This will init the window manager and add this window to the centralized pool of windows
         windowManager.init(metaData);
-
-        // Call update windows initially (it will later be called by the win change callback)
         windowsUpdated();
     }
 
@@ -121,14 +113,12 @@ if (new URLSearchParams(window.location.search).get("clear")) {
     function updateNumberOfCubes () {
         let wins = windowManager.getWindows();
 
-        // Remove all cubes
         cubes.forEach((c) => {
             world.remove(c);
         });
 
         cubes = [];
 
-        // Add new cubes based on the current window setup
         for (let i = 0; i < wins.length; i++) {
             let win = wins[i];
 
@@ -146,7 +136,6 @@ if (new URLSearchParams(window.location.search).get("clear")) {
     }
 
     function updateWindowShape (easing = true) {
-        // Storing the actual offset in a proxy that we update against in the render function
         sceneOffsetTarget = {x: -window.screenX, y: -window.screenY};
         if (!easing) sceneOffset = sceneOffsetTarget;
     }
@@ -155,18 +144,15 @@ if (new URLSearchParams(window.location.search).get("clear")) {
         let t = getTime();
         windowManager.update();
 
-        // Calculate the new position based on the delta between current offset and new offset times a falloff value
         let falloff = .05;
         sceneOffset.x = sceneOffset.x + ((sceneOffsetTarget.x - sceneOffset.x) * falloff);
         sceneOffset.y = sceneOffset.y + ((sceneOffsetTarget.y - sceneOffset.y) * falloff);
 
-        // Set the world position to the offset
         world.position.x = sceneOffset.x;
         world.position.y = sceneOffset.y;
 
         let wins = windowManager.getWindows();
 
-        // Loop through all our cubes and update their positions based on current window positions
         for (let i = 0; i < cubes.length; i++) {
             let cube = cubes[i];
             let win = wins[i];
@@ -176,15 +162,14 @@ if (new URLSearchParams(window.location.search).get("clear")) {
 
             cube.position.x = cube.position.x + (posTarget.x - cube.position.x) * falloff;
             cube.position.y = cube.position.y + (posTarget.y - cube.position.y) * falloff;
-            cube.rotation.x = _t * .5;
-            cube.rotation.y = _t * .3;
+            cube.rotation.x += animationSpeed; // Apply animation speed to rotation
+            cube.rotation.y += animationSpeed;
         }
 
         renderer.render(scene, camera);
         requestAnimationFrame(render);
     }
 
-    // Resize the renderer to fit the window size
     function resize () {
         let width = window.innerWidth;
         let height = window.innerHeight;
